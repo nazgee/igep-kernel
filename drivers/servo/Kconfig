@@ -1,0 +1,20 @@
+#
+# Servomechanism devices
+#
+
+menuconfig SERVO
+	bool "Servo devices"
+	default n
+	---help---
+	  You'll have to say Y if you wish to use servo's connected to your 
+	  board
+
+if SERVO
+config OMAP_SERVO
+	depends on HAVE_PWM
+	tristate "OMAP servomechanisms driver"
+	default n
+	---help---
+	  Say yes if you want to rock- depends on PWM being available
+
+endif # SERVO

@@ -113,6 +113,7 @@ obj-$(CONFIG_SSB)		+= ssb/
 obj-$(CONFIG_VHOST_NET)		+= vhost/
 obj-$(CONFIG_VLYNQ)		+= vlynq/
 obj-$(CONFIG_STAGING)		+= staging/
+obj-$(CONFIG_SERVO)		+= servo/
 obj-y				+= platform/
 obj-y				+= ieee802154/
 obj-$(CONFIG_DMM_OMAP)		+= media/
