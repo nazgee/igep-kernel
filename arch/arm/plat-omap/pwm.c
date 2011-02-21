@@ -18,6 +18,9 @@
 #include <linux/io.h>
 #include <linux/slab.h>
 #include <linux/pwm.h>
+#include <linux/semaphore.h>
+#include <linux/irq.h>
+#include <linux/interrupt.h>
 #include <mach/hardware.h>
 #include <plat/dmtimer.h>
 #include <plat/pwm.h>
@@ -71,6 +74,9 @@ struct pwm_device {
 	const char						  *label;
 	unsigned int					   use_count;
 	unsigned int					   pwm_id;
+	unsigned int load_value;
+	unsigned int match_value;
+	struct semaphore match_semaphore;
 };
 
 /* Function Prototypes */
@@ -180,6 +186,57 @@ static inline int pwm_calc_value(unsigned long clk_rate, int ns)
 	return DM_TIMER_LOAD_MIN - cycles;
 }
 
+static irqreturn_t pwm_match_int( int irq, void *data)
+{
+	struct pwm_device *pwm = data;
+	omap_dm_timer_write_status(pwm->dm_timer, OMAP_TIMER_INT_MATCH);
+	omap_dm_timer_set_int_enable(pwm->dm_timer, 0);
+	omap_dm_timer_set_match(pwm->dm_timer, true, pwm->match_value);
+	up(&pwm->match_semaphore);
+	return IRQ_HANDLED;
+}
+
+/**
+ * pwm_modify_duty - reconfigures the dusty cycke if generic PWM device to
+ * provide glitchless operation
+ * @pwm: A pointer to the PWM device to configure.
+ * @duty_ns: The duty period of the PWM, in nanoseconds.
+ * @period_ns: The overall period of the PWM, in nanoseconds.
+ *
+ * Returns 0 if the generic PWM device was successfully configured;
+ * otherwise, < 0 on error.
+ */
+void pwm_modify_duty(struct pwm_device *pwm, int duty_ns)
+{
+	unsigned long clk_rate;
+	const unsigned long nanoseconds_per_second = 1000000000;
+	__u64 ns;
+
+	clk_rate = clk_get_rate(omap_dm_timer_get_fclk(pwm->dm_timer));
+	pwm->match_value = pwm->load_value - pwm_calc_value(clk_rate, duty_ns);
+
+	ns = ((__u64)(DM_TIMER_LOAD_MIN - pwm->load_value) * nanoseconds_per_second);
+	do_div(ns,clk_rate);
+	do_div(ns,(1000*1000));
+
+	omap_dm_timer_set_int_enable(pwm->dm_timer, OMAP_TIMER_INT_MATCH);
+	if (down_timeout(&pwm->match_semaphore,
+			msecs_to_jiffies(ns + 1))) {
+		dev_err(&pwm->pdev->dev, "gave up waiting for match");
+		return;
+	}
+
+	DEV_DBG(&pwm->pdev->dev,
+			"new duty: %dus "
+			"new match value: %#08x (%d) "
+			"raw match value: %#08x (%d) "
+			"load value: %#08x (%d)\n",
+			duty_ns/1000,
+			pwm->match_value, pwm->match_value,
+			pwm_calc_value(clk_rate, duty_ns), pwm_calc_value(clk_rate, duty_ns),
+			pwm->load_value, pwm->load_value);
+}
+EXPORT_SYMBOL(pwm_modify_duty);
 /**
  * pwm_config - configures the generic PWM device to the specified parameters.
  * @pwm: A pointer to the PWM device to configure.
@@ -224,8 +281,10 @@ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns)
 	omap_dm_timer_set_match(pwm->dm_timer, enable, match_value);
 
 	DEV_DBG(&pwm->pdev->dev,
+			"clock rate: %ld "
 			"load value: %#08x (%d), "
 			"match value: %#08x (%d)\n",
+			clk_rate,
 			load_value, load_value,
 			match_value, match_value);
 
@@ -243,6 +302,8 @@ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns)
 	 */
 
 	omap_dm_timer_disable(pwm->dm_timer);
+	pwm->load_value = load_value;
+	pwm->match_value = match_value;
 
 	return status;
 }
@@ -318,6 +379,10 @@ static int __devinit omap_pwm_probe(struct platform_device *pdev)
 		goto done;
 	}
 
+	pwm->load_value = DM_TIMER_LOAD_MIN;
+	pwm->match_value = DM_TIMER_LOAD_MIN;
+	sema_init(&pwm->match_semaphore, 0);
+
 	/* Request the OMAP dual-mode timer that will be bound to and
 	 * associated with this generic PWM.
 	 */
@@ -326,6 +391,14 @@ static int __devinit omap_pwm_probe(struct platform_device *pdev)
 
 	if (pwm->dm_timer == NULL) {
 		status = -ENOENT;
+		goto err_free;
+	}
+
+	omap_dm_timer_set_int_enable(pwm->dm_timer, 0);
+	status = request_irq(omap_dm_timer_get_irq(pwm->dm_timer),
+			pwm_match_int, 0, "pwm match", pwm);
+	if (status) {
+		DEV_DBG(&pwm->pdev->dev,"Could not get irq");
 		goto err_free;
 	}
 
@@ -405,6 +478,7 @@ static int __devexit omap_pwm_remove(struct platform_device *pdev)
 	 * device.
 	 */
 
+	free_irq(omap_dm_timer_get_irq(pwm->dm_timer), pwm);
 	omap_dm_timer_free(pwm->dm_timer);
 
 	/* Finally, release the memory associated with the driver-private
