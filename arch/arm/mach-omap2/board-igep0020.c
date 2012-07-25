@@ -420,8 +420,8 @@ static struct omap_board_mux board_mux[] __initdata = {
 
 #if defined(CONFIG_HAVE_PWM)
 static struct omap_board_mux nsc_as_pwm_mux[] = {
-	OMAP3_MUX(GPMC_NCS4, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
-	OMAP3_MUX(GPMC_NCS7, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(GPMC_NCS4, OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(GPMC_NCS7, OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),
 	{ .reg_offset = OMAP_MUX_TERMINATOR },
 };
 #endif
