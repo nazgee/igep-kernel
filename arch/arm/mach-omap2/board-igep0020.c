@@ -36,6 +36,7 @@
 #include <plat/usb.h>
 #include <plat/display.h>
 #include <plat/onenand.h>
+#include <plat/pwm.h>
 
 #include "twl-common.h"
 #include "mux.h"
@@ -244,6 +245,40 @@ static struct twl4030_gpio_platform_data igep2_twl4030_gpio_pdata = {
 	.setup		= igep2_twl_gpio_setup,
 };
 
+#if defined(CONFIG_HAVE_PWM)
+static struct omap2_pwm_platform_config pwm1_config = {
+	.timer_id = 8,
+	.polarity = 1 // Active high
+};
+static struct platform_device igep2_pwm1_device = {
+	.name	= "omap-pwm",
+	.id	= 0,
+	.dev	= {
+		 .platform_data  =  &pwm1_config,
+	},
+};
+
+static struct omap2_pwm_platform_config pwm2_config = {
+	.timer_id = 9,
+	.polarity = 1 // Active high
+};
+static struct platform_device igep2_pwm2_device = {
+	.name	= "omap-pwm",
+	.id	= 1,
+	.dev	= {
+		.platform_data  =  &pwm2_config,
+	},
+};
+static struct platform_device *pwm_devices[] __initdata = {
+	&igep2_pwm1_device,
+	&igep2_pwm2_device
+};
+static inline void pwm_init(void)
+{
+	platform_add_devices(pwm_devices, ARRAY_SIZE(pwm_devices));
+}
+#endif
+
 static int igep0020_enable_dvi(struct omap_dss_device *dssdev)
 {
 	gpio_direction_output(GPIO_DVI_PUP, 1);
@@ -383,6 +418,14 @@ static struct omap_board_mux board_mux[] __initdata = {
 #define board_mux	NULL
 #endif
 
+#if defined(CONFIG_HAVE_PWM)
+static struct omap_board_mux nsc_as_pwm_mux[] = {
+	OMAP3_MUX(GPMC_NCS4, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	OMAP3_MUX(GPMC_NCS7, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
+	{ .reg_offset = OMAP_MUX_TERMINATOR },
+};
+#endif
+
 /* Use UART1 as RS232 (not RS485) */
 static struct omap_board_mux uart1_as_rs232_mux[] = {
 	OMAP3_MUX(UART1_TX, OMAP_MUX_MODE0 | OMAP_PIN_OUTPUT),
@@ -469,6 +512,11 @@ static void __init igep0020_init(void)
 	mux_partition = omap_mux_get("core");
 	if (igep0020_board_pdata.options & IGEP0020_BOARD_OPT_RS232)
 		omap_mux_write_array(mux_partition, uart1_as_rs232_mux);
+
+	#if defined(CONFIG_HAVE_PWM)
+	omap_mux_write_array(mux_partition, nsc_as_pwm_mux);
+	pwm_init();
+	#endif
 
 	/* Expansion board initialitzations */
 	/* - IGEP0022 */
