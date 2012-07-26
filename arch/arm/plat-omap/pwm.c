@@ -221,7 +221,7 @@ void pwm_modify_duty(struct pwm_device *pwm, int duty_ns)
 
 	omap_dm_timer_set_int_enable(pwm->dm_timer, OMAP_TIMER_INT_MATCH);
 	if (down_timeout(&pwm->match_semaphore,
-			msecs_to_jiffies(ns + 1))) {
+			msecs_to_jiffies(ns) + 1)) {
 		dev_err(&pwm->pdev->dev, "gave up waiting for match");
 		return;
 	}
