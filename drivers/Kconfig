@@ -113,4 +113,7 @@ source "drivers/staging/Kconfig"
 source "drivers/platform/Kconfig"
 
 source "drivers/servo/Kconfig"
+
+source "drivers/ultrasonic/Kconfig"
+
 endmenu

@@ -114,6 +114,7 @@ obj-$(CONFIG_VHOST_NET)		+= vhost/
 obj-$(CONFIG_VLYNQ)		+= vlynq/
 obj-$(CONFIG_STAGING)		+= staging/
 obj-$(CONFIG_SERVO)		+= servo/
+obj-$(CONFIG_ULTRASONIC)+= ultrasonic/
 obj-y				+= platform/
 obj-y				+= ieee802154/
 obj-$(CONFIG_DMM_OMAP)		+= media/

@@ -1,0 +1,20 @@
+#
+# Ultrasonic blah bla blah
+#
+
+menuconfig ULTRASONIC
+	bool "Ultrasonic ranging devices"
+	default n
+	---help---
+	  You'll have to say Y or M if you wish to use ultrasonic ranging device
+	  board
+
+if ULTRASONIC
+
+config ULTRASONIC_HC_SR04
+	tristate "HC SR04 Arduino ranging device"
+	default n
+	---help---
+	  Say yes if you have HC_SR04 and want to use it
+
+endif # ULTRASONIC
