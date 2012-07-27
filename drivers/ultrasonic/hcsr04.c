@@ -24,22 +24,23 @@
 //static int gpio_echo = 7;
 //module_param(gpio_echo, int, 0444);
 
-static struct class *ultrasonic_class; /* Tie with the device model */
-static struct hcsr04_dev {
-	struct ultrasonic_dev ultrasonic;
+struct hcsr04_dev {
+	struct ultrasonic_drv ultrasonic;
 	int gpio_trigger;
 	int gpio_echo;
-} *hcsr04_devs;
+};
 
-static int hcsr04_open(struct inode *inode, struct file *filp,
-		struct ultrasonic_dev* udev)
-{
-	struct hcsr04_dev *dev = udev;
-	filp->private_data = dev; /* for other methods */
-	return 0; /* success */
-}
+static int hcsr04_read(struct ultrasonic_drv* udrv);
 
-static int hcsr04_read() {
+static struct hcsr04_dev dev= {
+	.ultrasonic = {
+		.measure = hcsr04_read
+	},
+	.gpio_trigger = -1,
+	.gpio_echo = -1
+};
+
+int hcsr04_read(struct ultrasonic_drv* udrv) {
 	return 666;
 }
 
@@ -48,14 +49,14 @@ static int hcsr04_read() {
  */
 int __init ultrasonic_init(void)
 {
-	ultrasonic_register_device(NULL, "foo");
-	return 0;
+	return ultrasonic_register_driver(&dev.ultrasonic, ULTRASONIC_NAME);
 }
 
 /* Driver Exit */
 void __exit
 ultrasonic_cleanup(void)
 {
+	ultrasonic_unregister_driver(&dev.ultrasonic);
 	return;
 }
 

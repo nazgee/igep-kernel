@@ -11,21 +11,22 @@
 #include <linux/cdev.h>	//struct cdev
 #include <linux/rwsem.h>
 
-struct ultrasonic_dev;
-
-struct ultrasonic_operations {
-	int (*measure) (struct ultrasonic_dev* ultrasonic_dev);
-	int (*open) (struct inode *, struct file *, struct ultrasonic_dev* udev);
-};
+struct ultrasonic_drv;
 
 struct ultrasonic_dev {
 	struct cdev cdev; /* The cdev structure */
-	struct device* dev;
+	struct device* device;
 	char name[15]; /* Name of I/O region */
-	struct ultrasonic_operations* ops;
+	struct ultrasonic_drv* driver;
 	struct rw_semaphore sem; /* mutual exclusion semaphore */
 };
 
-int ultrasonic_register_device(struct ultrasonic_dev *dev, char* name);
+struct ultrasonic_drv {
+	struct ultrasonic_dev* udev;
+	int (*measure) (struct ultrasonic_drv* udrv);
+};
+
+int ultrasonic_register_driver(struct ultrasonic_drv *dev, char* name);
+int ultrasonic_unregister_driver(struct ultrasonic_drv *udrv);
 
 #endif /* ultrasonic */
