@@ -111,6 +111,7 @@ int ultrasonic_register_driver(struct ultrasonic_drv *udrv, char* name)
 		err = -ENOMEM;
 		goto out;
 	}
+	init_rwsem(&udev->sem);
 
 	/* Connect the file operations with cdev */
 	cdev_init(&udev->cdev, &ultrasonic.fops);
@@ -197,7 +198,7 @@ int __init ultrasonic_init(void)
 	goto out;
 
 error_cleanup_alloc_chrdev:
-	unregister_chrdev_region(ultrasonic.major, 256);
+	unregister_chrdev_region(MKDEV(ultrasonic.major, 0), 256);
 out:
 	return err;
 }
@@ -207,7 +208,7 @@ void __exit
 ultrasonic_cleanup(void)
 {
 	class_destroy(ultrasonic.class);
-	unregister_chrdev_region(ultrasonic.major, 256);
+	unregister_chrdev_region(MKDEV(ultrasonic.major, 0), 256);
 	return;
 }
 
