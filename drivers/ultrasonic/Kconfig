@@ -3,7 +3,7 @@
 #
 
 menuconfig ULTRASONIC
-	bool "Ultrasonic ranging devices"
+	tristate "Ultrasonic ranging devices"
 	default n
 	---help---
 	  You'll have to say Y or M if you wish to use ultrasonic ranging device
