@@ -133,7 +133,7 @@ int ultrasonic_register_driver(struct ultrasonic_drv *udrv, char* name)
 	}
 	udev->device = d;
 
-	printk(KERN_ERR ULTRASONIC_NAME": installed new drv $s (%d:%d)\n", name, MAJOR(udev->cdev.dev), MINOR(udev->cdev.dev));
+	printk(KERN_ERR ULTRASONIC_NAME": installed new drv %s (%d:%d)\n", name, MAJOR(udev->cdev.dev), MINOR(udev->cdev.dev));
 	ultrasonic.devices_number++;
 
 	// Match device and driver
