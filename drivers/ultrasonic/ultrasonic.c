@@ -117,7 +117,7 @@ int ultrasonic_register_driver(struct ultrasonic_drv *udrv, char* name)
 	udev->cdev.owner = THIS_MODULE;
 
 	/* Connect the major/minor number with cdev */
-	err = cdev_add(&udev->cdev, ultrasonic.major + devminor, 1);
+	err = cdev_add(&udev->cdev, MKDEV(ultrasonic.major, devminor), 1);
 	if (err) {
 		printk(KERN_ERR ULTRASONIC_NAME": failed to add character device (%d) for %s\n", err, name);
 		goto error_cleanup_alloc;
