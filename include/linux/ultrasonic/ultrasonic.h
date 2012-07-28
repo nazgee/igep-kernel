@@ -26,7 +26,7 @@ struct ultrasonic_drv {
 	int (*measure) (struct ultrasonic_drv* udrv);
 };
 
-int ultrasonic_register_driver(struct ultrasonic_drv *dev, char* name);
-int ultrasonic_unregister_driver(struct ultrasonic_drv *udrv);
+int ultrasonic_register_device(struct ultrasonic_drv *dev, char* name);
+int ultrasonic_unregister_device(struct ultrasonic_drv *udrv);
 
 #endif /* ultrasonic */

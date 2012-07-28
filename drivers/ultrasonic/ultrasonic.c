@@ -92,7 +92,7 @@ out:
 }
 
 
-int ultrasonic_register_driver(struct ultrasonic_drv *udrv, char* name)
+int ultrasonic_register_device(struct ultrasonic_drv *udrv, char* name)
 {
 	struct ultrasonic_dev* udev;
 	struct device* d;
@@ -126,7 +126,7 @@ int ultrasonic_register_driver(struct ultrasonic_drv *udrv, char* name)
 
 	/* Send uevents to udev, so it'll create /dev nodes */
 	d = device_create(ultrasonic.class, NULL, udev->cdev.dev, udev,
-			ULTRASONIC_NAME".%d.%s.", devminor, name);
+			ULTRASONIC_NAME".%d.%s", devminor, name);
 	if (IS_ERR(d)) {
 		printk(KERN_ERR ULTRASONIC_NAME": failed to add character device (%d) for %s\n", err, name);
 		err = PTR_ERR(d);
@@ -151,7 +151,7 @@ out:
 	return err;
 }
 
-int ultrasonic_unregister_driver(struct ultrasonic_drv *udrv)
+int ultrasonic_unregister_device(struct ultrasonic_drv *udrv)
 {
 	struct ultrasonic_dev *udev;
 
@@ -213,8 +213,8 @@ ultrasonic_cleanup(void)
 }
 
 /* Let modules register as our drivers */
-EXPORT_SYMBOL(ultrasonic_register_driver);
-EXPORT_SYMBOL(ultrasonic_unregister_driver);
+EXPORT_SYMBOL(ultrasonic_register_device);
+EXPORT_SYMBOL(ultrasonic_unregister_device);
 
 module_init(ultrasonic_init)
 module_exit(ultrasonic_cleanup)
