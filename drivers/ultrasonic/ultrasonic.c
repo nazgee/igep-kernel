@@ -66,7 +66,8 @@ ssize_t ultrasonic_read(struct file *filp, char __user *buf, size_t count,
 {
 	int rc, distance;
 	struct ultrasonic_dev *dev = filp->private_data;
-	char tmp[14];	/* 32bit value with sign + '\n' + '0' */
+//	char tmp[14];	/* 32bit value with sign + '\n' + '0' */
+	char tmp[32];	/* 32bit value with sign + '\n' + '0' */
 
 	if (*f_pos)	{
 		rc = 0;
