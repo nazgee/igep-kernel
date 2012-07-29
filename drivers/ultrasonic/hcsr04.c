@@ -232,14 +232,12 @@ int hcsr04_read(struct ultrasonic_drv* udrv) {
 	gpio_set_value(dev->gpio_trig, hcsr04_get_level_trigger(dev, 0));
 
 	wait_event_timeout(dev->wq_echo, dev->echo_us >= 0, msecs_to_jiffies(250) + 1);
-
+	disable_irq(dev->irq_echo);
 	if (dev->echo_us > HSCR04_NO_OBSTACLE_US) {
 		return -EINVAL;
 	} else {
 		return dev->echo_us / HSCR04_US_TO_CM_DIVISOR;
 	}
-
-	disable_irq(dev->irq_echo);
 }
 
 /*
