@@ -10,11 +10,17 @@
 #include <linux/gpio.h>
 #include <linux/irq.h>
 #include <linux/delay.h>
+#include <linux/poll.h>
+#include <linux/sched.h>
 #include <linux/interrupt.h>
 
 #define HARDWARE_NAME	"hcsr04"
 #define HSCR04_TRIG_LEVEL 1
 #define HSCR04_ECHO_LEVEL 1
+#define HSCR04_NO_OBSTACLE_US 38000
+#define HSCR04_TRIGGER_US 10
+#define HSCR04_US_TO_CM_DIVISOR 58
+
 
 static int hcsr04_read(struct ultrasonic_drv* udrv);
 
@@ -36,9 +42,9 @@ struct hcsr04_drv {
 	int gpio_echo;
 	int inverse_trig;
 	int inverse_echo;
-	struct timeval time_trigger;
-	struct timeval time_echo;
-	int foo;
+	struct timespec time_echo;
+	volatile int echo_us;
+	wait_queue_head_t wq_echo;
 };
 
 static struct hcsr04_drv drv = {
@@ -51,12 +57,33 @@ static struct hcsr04_drv drv = {
 	.inverse_trig = 0,
 	.inverse_echo = 0
 };
+
 static int hcsr04_get_level_trigger(struct hcsr04_drv* drv, int is_triggered) {
 	return is_triggered ^ drv->inverse_trig;
 }
 
-static int hcsr04_get_level_echo(struct hcsr04_drv* drv, int is_echoed) {
-	return is_echoed ^ drv->inverse_echo;
+static int hcsr04_set_echo_edge(struct hcsr04_drv* drv, int is_echo_expected) {
+	return set_irq_type(drv->irq_echo, (is_echo_expected ^ drv->inverse_echo) ?
+			IRQF_TRIGGER_RISING : IRQF_TRIGGER_FALLING);
+}
+
+static irqreturn_t hcsr04_echo_isr(int irq, void *cookie)
+{
+	struct  hcsr04_drv *dev = (struct hcsr04_drv*)cookie;
+
+	if (dev->echo_us < 0) {
+		hcsr04_set_echo_edge(dev, 0);
+		do_posix_clock_monotonic_gettime(&dev->time_echo);
+		dev->echo_us = 0;
+	} else {
+		struct timespec now, diff;
+		do_posix_clock_monotonic_gettime(&now);
+		diff = timespec_sub(now, dev->time_echo);
+		dev->echo_us = diff.tv_sec * USEC_PER_SEC + diff.tv_nsec / NSEC_PER_USEC;
+		wake_up(&dev->wq_echo);
+	}
+
+	return IRQ_HANDLED;
 }
 
 static int hcsr04_request_gpio(int gpio, int id, char* label) {
@@ -82,16 +109,6 @@ error_cleanup_request:
 	gpio_free(gpio);
 out:
 	return err;
-}
-
-static irqreturn_t hcsr04_echo_isr(int irq, void *cookie)
-{
-	struct  hcsr04_drv *dev = (struct hcsr04_drv*)cookie;
-	do_gettimeofday(&dev->time_echo);
-	dev->foo++;
-
-	//printk(KERN_ERR "aaa! irq!\n");
-	return IRQ_HANDLED;
 }
 
 static int hcsr04_request_echo(struct hcsr04_drv* drv) {
@@ -121,6 +138,8 @@ static int hcsr04_request_echo(struct hcsr04_drv* drv) {
 		printk(KERN_ERR "request_irq() failed: %d\n", err);
 		goto error_cleanup_request;
 	}
+
+	disable_irq_nosync(drv->irq_echo);
 
 	goto out;
 
@@ -204,14 +223,23 @@ int hcsr04_unregister(struct hcsr04_drv* drv) {
 
 int hcsr04_read(struct ultrasonic_drv* udrv) {
 	struct  hcsr04_drv *dev = (struct hcsr04_drv*)udrv;
-	do_gettimeofday(&dev->time_trigger);
 
+	hcsr04_set_echo_edge(dev, 1);
+	enable_irq(dev->irq_echo);
+	dev->echo_us = -EINVAL;
 	gpio_set_value(dev->gpio_trig, hcsr04_get_level_trigger(dev, 1));
-	udelay(10);
+	udelay(HSCR04_TRIGGER_US);
 	gpio_set_value(dev->gpio_trig, hcsr04_get_level_trigger(dev, 0));
 
-	return dev->foo;
-//	return 666;
+	wait_event_timeout(dev->wq_echo, dev->echo_us >= 0, msecs_to_jiffies(250) + 1);
+
+	if (dev->echo_us > HSCR04_NO_OBSTACLE_US) {
+		return -EINVAL;
+	} else {
+		return dev->echo_us / HSCR04_US_TO_CM_DIVISOR;
+	}
+
+	disable_irq(dev->irq_echo);
 }
 
 /*
@@ -222,6 +250,8 @@ int __init ultrasonic_init(void) {
 	drv.gpio_trig = gpio_trig;
 	drv.inverse_echo = inverse_echo;
 	drv.inverse_trig = inverse_trigger;
+	drv.echo_us = -EINVAL;
+	init_waitqueue_head(&drv.wq_echo);
 
 	return hcsr04_register(&drv);
 }
