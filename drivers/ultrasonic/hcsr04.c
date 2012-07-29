@@ -9,6 +9,7 @@
 #include <linux/moduleparam.h>
 #include <linux/gpio.h>
 #include <linux/irq.h>
+#include <linux/delay.h>
 #include <linux/interrupt.h>
 
 #define HARDWARE_NAME	"hcsr04"
@@ -50,14 +51,6 @@ static struct hcsr04_drv drv = {
 	.inverse_trig = 0,
 	.inverse_echo = 0
 };
-
-int hcsr04_read(struct ultrasonic_drv* udrv) {
-	struct  hcsr04_drv *dev = (struct hcsr04_drv*)udrv;
-	do_gettimeofday(&dev->time_trigger);
-	return dev->foo;
-//	return 666;
-}
-
 static int hcsr04_get_level_trigger(struct hcsr04_drv* drv, int is_triggered) {
 	return is_triggered ^ drv->inverse_trig;
 }
@@ -80,8 +73,13 @@ static int hcsr04_request_gpio(int gpio, int id, char* label) {
 	if (gpio_cansleep(gpio)) {
 		err = -EIO;
 		printk(KERN_ERR "given gpio can sleep- this is NOT acceptable!\n");
-		goto out;
+		goto error_cleanup_request;
 	}
+
+	goto out;
+
+error_cleanup_request:
+	gpio_free(gpio);
 out:
 	return err;
 }
@@ -92,7 +90,7 @@ static irqreturn_t hcsr04_echo_isr(int irq, void *cookie)
 	do_gettimeofday(&dev->time_echo);
 	dev->foo++;
 
-	printk(KERN_ERR "aaa! irq!\n");
+	//printk(KERN_ERR "aaa! irq!\n");
 	return IRQ_HANDLED;
 }
 
@@ -118,18 +116,14 @@ static int hcsr04_request_echo(struct hcsr04_drv* drv) {
 		goto error_cleanup_request;
 	}
 
-	err = request_irq(drv->irq_echo, hcsr04_echo_isr, IRQF_SHARED | IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, HARDWARE_NAME".echo", drv);
+	err = request_irq(drv->irq_echo, hcsr04_echo_isr, IRQF_TRIGGER_FALLING, HARDWARE_NAME"_echo", drv);
 	if (err < 0) {
 		printk(KERN_ERR "request_irq() failed: %d\n", err);
-		goto error_cleanup_irq; // to nie jest potrzebne FIXME
+		goto error_cleanup_request;
 	}
-//	set_irq_type(drv->irq_echo, IRQ_TYPE_EDGE_BOTH);
-	// disable_irq(drv->irq_echo);
 
 	goto out;
 
-error_cleanup_irq:
-	free_irq(drv->irq_echo, drv);
 error_cleanup_request:
 	gpio_free(gpio);
 out:
@@ -137,7 +131,7 @@ out:
 }
 
 static int hcsr04_request_trig(struct hcsr04_drv* drv) {
-	int err = 0;
+	int value, err = 0;
 	int gpio = drv->gpio_trig;
 
 	err = hcsr04_request_gpio(gpio, drv->id, "trig");
@@ -145,16 +139,29 @@ static int hcsr04_request_trig(struct hcsr04_drv* drv) {
 		goto out;
 	}
 
-	err = gpio_direction_output(gpio, hcsr04_get_level_trigger(drv, 0));
+	value = hcsr04_get_level_trigger(drv, 0);
+	printk(KERN_ERR "trigger@%d is off (%d)\n", gpio, value);
+	err = gpio_direction_output(gpio, value);
 	if (err) {
 		printk(KERN_ERR "could not set direction of gpio%d to output!\n", gpio);
 		goto error_cleanup_request;
 	}
 
+	goto out;
+
 error_cleanup_request:
 	gpio_free(gpio);
 out:
 	return err;
+}
+
+void hcsr04_free_echo(struct hcsr04_drv* drv) {
+	free_irq(drv->irq_echo, drv);
+	gpio_free(drv->gpio_echo);
+}
+
+void hcsr04_free_trig(struct hcsr04_drv* drv) {
+	gpio_free(drv->gpio_trig);
 }
 
 int hcsr04_register(struct hcsr04_drv* drv) {
@@ -175,10 +182,13 @@ int hcsr04_register(struct hcsr04_drv* drv) {
 		goto error_cleanup_trig;
 	}
 
+	goto out;
+
 error_cleanup_trig:
-	gpio_free(drv->gpio_trig);
+	hcsr04_free_trig(drv);
 error_cleanup_echo:
-	gpio_free(drv->gpio_echo);
+	hcsr04_free_echo(drv);
+
 out:
 	return err;
 }
@@ -187,10 +197,21 @@ int hcsr04_unregister(struct hcsr04_drv* drv) {
 	int err = 0;
 
 	ultrasonic_unregister_device(&drv->udrv);
-	free_irq(drv->irq_echo, drv);
-	gpio_free(drv->gpio_trig);
-	gpio_free(drv->gpio_echo);
+	hcsr04_free_trig(drv);
+	hcsr04_free_echo(drv);
 	return err;
+}
+
+int hcsr04_read(struct ultrasonic_drv* udrv) {
+	struct  hcsr04_drv *dev = (struct hcsr04_drv*)udrv;
+	do_gettimeofday(&dev->time_trigger);
+
+	gpio_set_value(dev->gpio_trig, hcsr04_get_level_trigger(dev, 1));
+	udelay(10);
+	gpio_set_value(dev->gpio_trig, hcsr04_get_level_trigger(dev, 0));
+
+	return dev->foo;
+//	return 666;
 }
 
 /*
