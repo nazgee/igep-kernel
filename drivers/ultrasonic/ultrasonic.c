@@ -48,6 +48,7 @@ static struct ultrasonic_context ultrasonic = {
 		.owner = THIS_MODULE,		/* Owner */
 		.open = ultrasonic_open,	/* Open method */
 		.read = ultrasonic_read,	/* Read method */
+		.llseek = default_llseek,
 	}
 };
 
@@ -77,7 +78,7 @@ ssize_t ultrasonic_read(struct file *filp, char __user *buf, size_t count,
 
 	down_read(&dev->sem);
 	distance = dev->driver->measure(dev->driver);
-	snprintf(tmp, sizeof(tmp), "%d\n", distance );
+	snprintf(tmp, sizeof(tmp), "%d", distance );
 	up_read(&dev->sem);
 
 	rc = strlen(tmp)+1;
