@@ -19,7 +19,10 @@
 #define HSCR04_TRIG_LEVEL 1
 #define HSCR04_ECHO_LEVEL 1
 #define HSCR04_NO_OBSTACLE_US 38000
+#define HSCR04_MEASUREMENT_TIMEOUT_MS 250
 #define HSCR04_TRIGGER_US 10
+#define HSCR04_ECHO_FADE_MIN_US 20000
+#define HSCR04_ECHO_FADE_US 50000
 #define HSCR04_US_TO_CM_DIVISOR 58
 
 
@@ -87,7 +90,6 @@ static irqreturn_t hcsr04_echo_isr(int irq, void *cookie)
 		hcsr04_set_echo_edge(dev, 0);
 		do_posix_clock_monotonic_gettime(&dev->timestamp_trigger);
 		dev->ping_trigger = 0;
-		dev->ping_rxed = 0;
 	} else {
 		us = hcsr04_us_from_trigger(dev);
 		if (us > HSCR04_US_TO_CM_DIVISOR) {
@@ -188,11 +190,15 @@ out:
 	return err;
 }
 
-static int hcsr04_cm_from_us(int echo_us) {
-	if ((echo_us > HSCR04_NO_OBSTACLE_US) || (echo_us == 0)) {
+static int hcsr04_is_us_valid(int ping_us) {
+	return (ping_us < HSCR04_NO_OBSTACLE_US);
+}
+
+static int hcsr04_cm_from_us(int ping_us) {
+	if (!hcsr04_is_us_valid(ping_us)) {
 		return -EINVAL;
 	} else {
-		return echo_us / HSCR04_US_TO_CM_DIVISOR;
+		return ping_us / HSCR04_US_TO_CM_DIVISOR;
 	}
 }
 
@@ -244,7 +250,7 @@ int hcsr04_unregister(struct hcsr04_drv* drv) {
 }
 
 int hcsr04_read(struct ultrasonic_drv* udrv) {
-	int echo_us, res;
+	int echo_us, last_trig_us;
 	long timeout;
 	struct  hcsr04_drv *dev = (struct hcsr04_drv*)udrv;
 
@@ -261,6 +267,20 @@ int hcsr04_read(struct ultrasonic_drv* udrv) {
 		return hcsr04_cm_from_us(dev->ping_us);
 	}
 
+	last_trig_us = hcsr04_us_from_trigger(dev);
+
+	if (hcsr04_is_us_valid(dev->ping_us)) {
+		// ping was rxed, so no need to wait till it fades out
+		if (last_trig_us < HSCR04_ECHO_FADE_MIN_US) {
+			udelay(HSCR04_ECHO_FADE_MIN_US - last_trig_us);
+		}
+	} else {
+		// no ping rxed previously. let's wait for full echo fade period
+		if (last_trig_us < HSCR04_ECHO_FADE_US) {
+			udelay(HSCR04_ECHO_FADE_US - last_trig_us);
+		}
+	}
+
 	hcsr04_set_echo_edge(dev, 1);
 	dev->ping_trigger = 1;
 	dev->ping_rxed = 0;
@@ -270,14 +290,13 @@ int hcsr04_read(struct ultrasonic_drv* udrv) {
 	gpio_set_value(dev->gpio_trig, hcsr04_get_level_trigger(dev, 1));
 	udelay(HSCR04_TRIGGER_US);
 	gpio_set_value(dev->gpio_trig, hcsr04_get_level_trigger(dev, 0));
-	udelay(HSCR04_TRIGGER_US);
 
 	// wait for echo reception
-	timeout = wait_event_timeout(dev->wq_echo, dev->ping_rxed, msecs_to_jiffies(250) + 1);
+	timeout = wait_event_timeout(dev->wq_echo, dev->ping_rxed, msecs_to_jiffies(HSCR04_MEASUREMENT_TIMEOUT_MS) + 1);
 	disable_irq(dev->irq_echo);
 
 	if (!dev->ping_rxed || !timeout) {
-		dev->ping_us = -EINVAL;
+		dev->ping_us = HSCR04_NO_OBSTACLE_US;
 	}
 
 	echo_us = dev->ping_us;
@@ -296,7 +315,7 @@ int __init ultrasonic_init(void) {
 	drv.gpio_trig = gpio_trig;
 	drv.inverse_echo = inverse_echo;
 	drv.inverse_trig = inverse_trigger;
-	drv.ping_us = -EINVAL;
+	drv.ping_us = HSCR04_NO_OBSTACLE_US;
 	init_waitqueue_head(&drv.wq_echo);
 	sema_init(&drv.sem, 1);
 
