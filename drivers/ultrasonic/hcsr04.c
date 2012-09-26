@@ -43,10 +43,10 @@ struct hcsr04_drv {
 	int gpio_echo;
 	int inverse_trig;
 	int inverse_echo;
-	struct timespec timestamp_ping;
-	volatile int echo_us;
-	volatile int echo_trigger;
-	volatile int echo_rxed;
+	struct timespec timestamp_trigger;
+	volatile int ping_us;
+	volatile int ping_trigger;
+	volatile int ping_rxed;
 	wait_queue_head_t wq_echo;
 	struct semaphore sem; /* locks against simultaneous measurements */
 };
@@ -71,24 +71,28 @@ static int hcsr04_set_echo_edge(struct hcsr04_drv* drv, int is_echo_expected) {
 			IRQF_TRIGGER_RISING : IRQF_TRIGGER_FALLING);
 }
 
+static int hcsr04_us_from_trigger(struct hcsr04_drv *dev) {
+	struct timespec now, diff;
+	do_posix_clock_monotonic_gettime(&now);
+	diff = timespec_sub(now, dev->timestamp_trigger);
+	return diff.tv_sec * USEC_PER_SEC + diff.tv_nsec / NSEC_PER_USEC;
+}
+
 static irqreturn_t hcsr04_echo_isr(int irq, void *cookie)
 {
 	struct  hcsr04_drv *dev = (struct hcsr04_drv*)cookie;
 	int us;
 
-	if (dev->echo_trigger) {
+	if (dev->ping_trigger) {
 		hcsr04_set_echo_edge(dev, 0);
-		do_posix_clock_monotonic_gettime(&dev->timestamp_ping);
-		dev->echo_trigger = 0;
-		dev->echo_rxed = 0;
+		do_posix_clock_monotonic_gettime(&dev->timestamp_trigger);
+		dev->ping_trigger = 0;
+		dev->ping_rxed = 0;
 	} else {
-		struct timespec now, diff;
-		do_posix_clock_monotonic_gettime(&now);
-		diff = timespec_sub(now, dev->timestamp_ping);
-		us = diff.tv_sec * USEC_PER_SEC + diff.tv_nsec / NSEC_PER_USEC;
+		us = hcsr04_us_from_trigger(dev);
 		if (us > HSCR04_US_TO_CM_DIVISOR) {
-			dev->echo_rxed = 1;
-			dev->echo_us = us;
+			dev->ping_rxed = 1;
+			dev->ping_us = us;
 			wake_up(&dev->wq_echo);
 		}
 	}
@@ -248,18 +252,18 @@ int hcsr04_read(struct ultrasonic_drv* udrv) {
 	// if measuement in progress, wait for its results
 	if (down_trylock(&drv.sem)) {
 		if (down_interruptible(&drv.sem) == 0) {
-			echo_us = dev->echo_us;
+			echo_us = dev->ping_us;
 			up(&drv.sem);
 
 			return hcsr04_cm_from_us(echo_us);
 		}
 		// someone interrupted us - return last known value
-		return hcsr04_cm_from_us(dev->echo_us);
+		return hcsr04_cm_from_us(dev->ping_us);
 	}
 
 	hcsr04_set_echo_edge(dev, 1);
-	dev->echo_trigger = 1;
-	dev->echo_rxed = 0;
+	dev->ping_trigger = 1;
+	dev->ping_rxed = 0;
 
 	// trigger ping signal
 	enable_irq(dev->irq_echo);
@@ -269,14 +273,14 @@ int hcsr04_read(struct ultrasonic_drv* udrv) {
 	udelay(HSCR04_TRIGGER_US);
 
 	// wait for echo reception
-	timeout = wait_event_timeout(dev->wq_echo, dev->echo_rxed, msecs_to_jiffies(250) + 1);
+	timeout = wait_event_timeout(dev->wq_echo, dev->ping_rxed, msecs_to_jiffies(250) + 1);
 	disable_irq(dev->irq_echo);
 
-	if (!dev->echo_rxed || !timeout) {
-		dev->echo_us = -EINVAL;
+	if (!dev->ping_rxed || !timeout) {
+		dev->ping_us = -EINVAL;
 	}
 
-	echo_us = dev->echo_us;
+	echo_us = dev->ping_us;
 
 	// measurement done
 	up(&drv.sem);
@@ -292,7 +296,7 @@ int __init ultrasonic_init(void) {
 	drv.gpio_trig = gpio_trig;
 	drv.inverse_echo = inverse_echo;
 	drv.inverse_trig = inverse_trigger;
-	drv.echo_us = -EINVAL;
+	drv.ping_us = -EINVAL;
 	init_waitqueue_head(&drv.wq_echo);
 	sema_init(&drv.sem, 1);
 
