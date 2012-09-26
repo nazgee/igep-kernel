@@ -43,7 +43,7 @@ struct hcsr04_drv {
 	int gpio_echo;
 	int inverse_trig;
 	int inverse_echo;
-	struct timespec time_echo;
+	struct timespec timestamp_ping;
 	volatile int echo_us;
 	volatile int echo_trigger;
 	volatile int echo_rxed;
@@ -74,18 +74,23 @@ static int hcsr04_set_echo_edge(struct hcsr04_drv* drv, int is_echo_expected) {
 static irqreturn_t hcsr04_echo_isr(int irq, void *cookie)
 {
 	struct  hcsr04_drv *dev = (struct hcsr04_drv*)cookie;
+	int us;
 
 	if (dev->echo_trigger) {
 		hcsr04_set_echo_edge(dev, 0);
-		do_posix_clock_monotonic_gettime(&dev->time_echo);
+		do_posix_clock_monotonic_gettime(&dev->timestamp_ping);
 		dev->echo_trigger = 0;
+		dev->echo_rxed = 0;
 	} else {
 		struct timespec now, diff;
 		do_posix_clock_monotonic_gettime(&now);
-		diff = timespec_sub(now, dev->time_echo);
-		dev->echo_us = diff.tv_sec * USEC_PER_SEC + diff.tv_nsec / NSEC_PER_USEC;
-		dev->echo_rxed = 1;
-		wake_up(&dev->wq_echo);
+		diff = timespec_sub(now, dev->timestamp_ping);
+		us = diff.tv_sec * USEC_PER_SEC + diff.tv_nsec / NSEC_PER_USEC;
+		if (us > HSCR04_US_TO_CM_DIVISOR) {
+			dev->echo_rxed = 1;
+			dev->echo_us = us;
+			wake_up(&dev->wq_echo);
+		}
 	}
 
 	return IRQ_HANDLED;
@@ -235,14 +240,20 @@ int hcsr04_unregister(struct hcsr04_drv* drv) {
 }
 
 int hcsr04_read(struct ultrasonic_drv* udrv) {
-	int echo_us;
+	int echo_us, res;
 	long timeout;
 	struct  hcsr04_drv *dev = (struct hcsr04_drv*)udrv;
 
 	// only one measurement at a time allowed
-	int res = down_interruptible(&drv.sem);
-	if (res == -EINTR) {
-		// someone told us to stop - return last known value
+	// if measuement in progress, wait for its results
+	if (down_trylock(&drv.sem)) {
+		if (down_interruptible(&drv.sem) == 0) {
+			echo_us = dev->echo_us;
+			up(&drv.sem);
+
+			return hcsr04_cm_from_us(echo_us);
+		}
+		// someone interrupted us - return last known value
 		return hcsr04_cm_from_us(dev->echo_us);
 	}
 
@@ -255,12 +266,13 @@ int hcsr04_read(struct ultrasonic_drv* udrv) {
 	gpio_set_value(dev->gpio_trig, hcsr04_get_level_trigger(dev, 1));
 	udelay(HSCR04_TRIGGER_US);
 	gpio_set_value(dev->gpio_trig, hcsr04_get_level_trigger(dev, 0));
+	udelay(HSCR04_TRIGGER_US);
 
 	// wait for echo reception
 	timeout = wait_event_timeout(dev->wq_echo, dev->echo_rxed, msecs_to_jiffies(250) + 1);
 	disable_irq(dev->irq_echo);
 
-	if (!timeout) {
+	if (!dev->echo_rxed || !timeout) {
 		dev->echo_us = -EINVAL;
 	}
 
